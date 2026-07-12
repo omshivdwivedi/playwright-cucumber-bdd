@@ -6,7 +6,7 @@ application.
 
 The framework follows a clean, layered design (Page Objects + step definitions + hooks + utilities),
 supports data-driven testing from Excel, runs scenarios in parallel, and produces rich HTML reports
-via cucumber-html-reporter.
+via cucumber-html-reporter — with optional Playwright traces and video capture on demand.
 
 ---
 
@@ -49,7 +49,7 @@ playwright-cucumber-bdd/
 ├── package.json                # Dependencies & npm scripts
 ├── cucumber.js                 # Cucumber config (require/feature paths, formatters)
 ├── CucumberReporter.js         # Generates HTML reports from the JSON output
-├── test.properties             # Environment / report configuration
+├── test.properties             # Environment / browser / report configuration
 ├── README.md
 ├── cucumber-report/            # Generated JSON + HTML reports (output)
 └── tests/
@@ -59,7 +59,7 @@ playwright-cucumber-bdd/
     │   ├── LoginTest.feature
     │   └── DataDrivenLogin.feature
     ├── hooks/
-    │   └── CucumberHooks.js      # Browser/context lifecycle + failure screenshots
+    │   └── CucumberHooks.js      # Browser/context lifecycle + failure screenshots/traces/video
     ├── pages/                    # Page Objects (locators + actions)
     │   ├── LoginPage.js
     │   └── DashboardPage.js
@@ -67,8 +67,7 @@ playwright-cucumber-bdd/
     │   ├── LoginPageSteps.js
     │   └── DashboardSteps.js
     ├── testData/                 # Data-driven test input
-    │   ├── Invalid_Login_Test_Data.xlsx
-    │   └── Invalid_Login_Test_Data.csv
+    │   └── Invalid_Login_Test_Data.xlsx
     └── utils/
         └── DataReader.js         # Excel reader (SheetJS)
 ```
@@ -79,19 +78,27 @@ playwright-cucumber-bdd/
 
 The framework is organized into distinct, single-responsibility layers:
 
-- **Page Objects (`pages/`)** — Each class wraps a single page (e.g. `LoginPage`, `DashboardPage`),
-  exposing locators as getters and interactions as action methods. Tests never touch raw selectors.
+- **Feature files (`tests/features`)** — Business-readable scenarios written in Gherkin. Tagged
+  (`@TestLogin`, `@Smoke`, `@Test`) so subsets can be run selectively. `DataDrivenLogin.feature`
+  uses a `Scenario Outline` with an `Examples` table to drive the same steps over multiple data rows.
 
-- **Custom World (`base/CustomWorld.js`)** — Extends Cucumber's `World` and lazily instantiates page
-  objects (`this.loginPage`, `this.dashboardPage`) backed by the current Playwright `page`, making
-  them available across all step definitions.
+- **Step definitions (`tests/steps`)** — The glue layer. Each `Given/When/Then` maps a Gherkin step
+  to Page Object actions and Playwright assertions (`expect`). Screenshots are attached to the report
+  at key steps via `this.attach(...)`.
 
-- **Hooks (`hooks/CucumberHooks.js`)** — Manage the browser lifecycle: launch the browser once
-  (`BeforeAll`), create a fresh isolated context + page per scenario (`Before`), capture a screenshot
-  on failure and close the context (`After`), and close the browser at the end (`AfterAll`).
+- **Page Objects (`tests/pages`)** — Each class wraps a single page and exposes lazy-evaluated
+  locators (getters) plus action methods (e.g. `login()`, `validateHeader()`). Tests interact through
+  these methods instead of touching raw selectors.
 
-- **Step Definitions (`steps/`)** — Map plain-English Gherkin phrases to page-object actions and
-  Playwright assertions, attaching step screenshots to the report.
+- **Custom World (`tests/base/CustomWorld.js`)** — Extends Cucumber's `World` and exposes lazily
+  instantiated page objects (`this.loginPage`, `this.dashboardPage`), each bound to the current
+  Playwright `page`.
+
+- **Hooks (`hooks/CucumberHooks.js`)** — Manage the browser lifecycle: launch the configured browser
+  once (`BeforeAll`), create a fresh isolated context + page per scenario (`Before`), and on scenario
+  end (`After`) capture a screenshot + Playwright trace on failure, then close the context; the
+  browser is closed at the end (`AfterAll`). Trace and video capture are toggled from
+  `test.properties`.
 
 - **Utils (`utils/DataReader.js`)** — Reads data-driven inputs from Excel via SheetJS, returning an
   array of row objects consumed by `Scenario Outline` steps.
@@ -101,7 +108,9 @@ The framework is organized into distinct, single-responsibility layers:
 ## Prerequisites
 
 - **Node.js 18+**
-- **Google Chrome** installed (the default configuration uses the installed Chrome channel)
+- A supported browser installed for the channel you choose in `test.properties`:
+  **Microsoft Edge** (default) or **Google Chrome**. Firefox/WebKit/bundled Chromium are supplied
+  by Playwright.
 - Internet access (tests run against the live public OrangeHRM demo site)
 
 Verify your setup:
@@ -142,7 +151,7 @@ npx cucumber-js --tags @Test      # data-driven invalid-login scenario
 npx cucumber-js                   # run all scenarios
 ```
 
-Generate the HTML report on demand:
+Generate the HTML report on demand (from the last `cucumber_report.json`):
 
 ```powershell
 node CucumberReporter.js
@@ -162,42 +171,47 @@ npx cucumber-js --tags @Test --parallel 3
 
 To make it the default, add `parallel: 2` to the `default` profile in `cucumber.js`.
 
-> **Note:** With `headless: false`, each worker opens a visible browser window. Set
-> `headless: true` in `tests/hooks/CucumberHooks.js` for faster, cleaner parallel runs.
+> **Note:** With `headless = false`, each worker opens a visible browser window. Set
+> `headless = true` in `test.properties` for faster, cleaner parallel runs.
 
 ---
 
 ## Browser Options
 
-The browser is launched in `tests/hooks/CucumberHooks.js`. By default it uses the **installed Google
-Chrome** via the `channel` option:
+The browser is **not hard-coded** — it is selected at runtime from the `browser` property in
+`test.properties` and launched in `tests/hooks/CucumberHooks.js`. The `BeforeAll` hook maps the
+property value to the matching Playwright launcher:
 
-```js
-browser = await chromium.launch({
-  headless: false,
-  args: ["--start-maximized"],
-  channel: 'chrome',       // uses the installed Chrome
-});
-```
+| `browser` value | Launcher                                         |
+| --------------- | ------------------------------------------------ |
+| `edge`          | Chromium with `channel: 'msedge'` (**default**)  |
+| `chrome`        | Chromium with `channel: 'chrome'`                |
+| `chromium`      | Playwright's bundled Chromium                    |
+| `firefox`       | Firefox                                          |
+| `webkit`        | WebKit                                           |
 
-- To use **Playwright's bundled Chromium** instead, remove the `channel: 'chrome'` line.
-- To run **Firefox** or **WebKit**, import the matching launcher:
+The Chromium-based channels launch with `--start-maximized`. Headless mode follows the `headless`
+property. To switch browsers, just edit `test.properties`:
 
-```js
-const { firefox } = require('@playwright/test');   // or: webkit
-browser = await firefox.launch({ headless: true });
+```properties
+browser=chrome
+headless=true
 ```
 
 ---
 
 ## Configuration
 
-Environment and report settings live in `test.properties`:
+Environment, browser, and report settings live in `test.properties`:
 
-| Property          | Description                                         | Example  |
-| ----------------- | --------------------------------------------------- | -------- |
-| `env`             | Environment label shown in the report metadata      | `local`  |
-| `outputDirectory` | Sub-folder under `cucumber-report/` for HTML reports| `test`   |
+| Property          | Description                                                    | Example    |
+| ----------------- | -------------------------------------------------------------- | ---------- |
+| `env`             | Environment label shown in the report metadata                 | `local`    |
+| `browser`         | Browser to launch (`edge` / `chrome` / `chromium` / `firefox` / `webkit`) | `edge`     |
+| `headless`        | Run the browser headless (`true` / `false`)                    | `false`    |
+| `outputDirectory` | Sub-folder under `cucumber-report/` for HTML reports & artifacts| `test`     |
+| `recordVideo`     | Record video per scenario (kept only on failure)               | `false`    |
+| `enableTrace`     | Capture a Playwright trace (saved as a `.zip` on failure)      | `true`     |
 
 Cucumber's require paths, feature paths, and JSON formatter are configured in `cucumber.js`.
 
@@ -205,7 +219,7 @@ Cucumber's require paths, feature paths, and JSON formatter are configured in `c
 
 ## Test Data
 
-Data-driven tests read from `tests/testData/Invalid_Login_Test_Data.xlsx` (Sheet1). The header row
+Data-driven tests read from `tests/testData/Invalid_Login_Test_Data.xlsx` (`Sheet1`). The header row
 maps directly to login fields:
 
 ```
@@ -232,7 +246,9 @@ converts them into HTML via cucumber-html-reporter:
   `cucumber-report/<outputDirectory>/feature_<n>/{passed,failed}/`.
 
 Each report includes step-level screenshots and metadata (app version, environment, browser,
-platform).
+platform). On failure, a full-page screenshot is attached and — when `enableTrace=true` — a
+Playwright trace is saved to `cucumber-report/<outputDirectory>/traces/`. With `recordVideo=true`,
+a video of failing scenarios is kept under `cucumber-report/<outputDirectory>/video/`.
 
 ---
 
@@ -250,7 +266,7 @@ platform).
 
 A screenshot of the generated Cucumber HTML report:
 
-<img width="1920" height="949" alt="cucumber" src="https://github.com/user-attachments/assets/4b8fc464-0fe0-4d56-ac1e-62fc248fb5e8" />
+<img width="1920" height="951" alt="report" src="https://github.com/user-attachments/assets/4d5b7ece-2df0-4a36-80f0-9b4944542889" />
 
 
 ---
