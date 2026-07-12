@@ -21,8 +21,13 @@ class DashboardPage {
     /********** Action Methods **********/
 
     async validateHeader() {
-        await this.header_Dashboard.waitFor({ state: 'visible' });
-        return await this.header_Dashboard.isVisible();
+        try {
+            await this.header_Dashboard.waitFor({ state: 'visible', timeout: 30000 });
+            return true;
+        }
+        catch(e){
+            return false;
+        }
     }
 
     async click_usrDropdown() {

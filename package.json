@@ -5,7 +5,8 @@
   "main": "index.js",
   "scripts": {
     "test:custom": "cucumber-js --tags @TestLogin && node CucumberReporter.js",
-    "test:smoke":  "cucumber-js --tags @Smoke && node CucumberReporter.js"
+    "test:smoke":  "cucumber-js --tags @Smoke && node CucumberReporter.js",
+    "report":      "node CucumberReporter.js"
   },
   "keywords": [],
   "author": "",

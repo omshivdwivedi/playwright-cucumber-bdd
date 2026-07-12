@@ -10,6 +10,7 @@ try {
   const properties = PropertiesReader("test.properties");
   const env = properties.get("env") || "LOCAL"; 
   const outputDirectory = properties.get("outputDirectory") || "out";
+  const browser = properties.get("browser") || "Chromium";
   
   const reportFilePath = path.join("cucumber-report", "cucumber_report.json");
   const baseOutputDir = path.join("cucumber-report", outputDirectory);
@@ -25,8 +26,8 @@ try {
     metadata: {
       "App Version": "1.0.0",
       "Test Environment": env.toUpperCase(),
-      Browser: "Chrome",
-      Platform: os.type(),
+      Browser: browser,
+      Platform: os.type()
     },
   };
 
